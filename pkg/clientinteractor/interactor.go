@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/pg-sharding/spqr/pkg/models/dataspaces"
 	"github.com/pg-sharding/spqr/pkg/models/topology"
+	"github.com/pg-sharding/spqr/pkg/pool"
 	"github.com/pg-sharding/spqr/pkg/shard"
 	"github.com/pg-sharding/spqr/pkg/txstatus"
 
@@ -43,7 +45,7 @@ func (pi *PSQLInteractor) CompleteMsg(rowCnt int) error {
 		},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -84,7 +86,7 @@ func (pi *PSQLInteractor) WriteDataRow(msgs ...string) error {
 
 func (pi *PSQLInteractor) Databases(dbs []string) error {
 	if err := pi.WriteHeader("show databases"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -92,7 +94,7 @@ func (pi *PSQLInteractor) Databases(dbs []string) error {
 		"show dbs",
 	} {
 		if err := pi.WriteDataRow(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -101,7 +103,7 @@ func (pi *PSQLInteractor) Databases(dbs []string) error {
 		if err := pi.cl.Send(&pgproto3.DataRow{
 			Values: [][]byte{[]byte(fmt.Sprintf("database %s", db))},
 		}); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -109,27 +111,37 @@ func (pi *PSQLInteractor) Databases(dbs []string) error {
 	return pi.CompleteMsg(len(dbs))
 }
 
-func (pi *PSQLInteractor) Pools() error {
-	if err := pi.WriteHeader("show pools"); err != nil {
-		spqrlog.Logger.PrintError(err)
+func (pi *PSQLInteractor) Pools(_ context.Context, ps []pool.Pool) error {
+	if err := pi.WriteHeader(
+		"pool id",
+		"pool db",
+		"pool usr",
+		"used connection count",
+		"idle connections",
+		"queue residual size"); err != nil {
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
-	for _, msg := range []string{
-		"show pools",
-	} {
-		if err := pi.WriteDataRow(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+	for _, p := range ps {
+		if err := pi.WriteDataRow(
+			fmt.Sprintf("%p", p),
+			p.Rule().DB,
+			p.Rule().Usr,
+			fmt.Sprintf("%d", p.UsedConnectionCount()),
+			fmt.Sprintf("%d", p.IdleConnectionCount()),
+			fmt.Sprintf("%d", p.QueueResidualSize())); err != nil {
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
 
-	return pi.CompleteMsg(0)
+	return pi.CompleteMsg(len(ps))
 }
 
 func (pi *PSQLInteractor) AddShard(shard *datashards.DataShard) error {
 	if err := pi.WriteHeader("add datashard"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -137,7 +149,7 @@ func (pi *PSQLInteractor) AddShard(shard *datashards.DataShard) error {
 		&pgproto3.DataRow{Values: [][]byte{[]byte(fmt.Sprintf("created datashard with name %s", shard.ID))}},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -146,7 +158,7 @@ func (pi *PSQLInteractor) AddShard(shard *datashards.DataShard) error {
 }
 
 func (pi *PSQLInteractor) KeyRanges(krs []*kr.KeyRange) error {
-	spqrlog.Logger.Printf(spqrlog.DEBUG3, "listing key ranges")
+	spqrlog.Zero.Debug().Msg("listing key ranges")
 
 	for _, msg := range []pgproto3.BackendMessage{
 		&pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{
@@ -158,7 +170,7 @@ func (pi *PSQLInteractor) KeyRanges(krs []*kr.KeyRange) error {
 		},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -172,7 +184,7 @@ func (pi *PSQLInteractor) KeyRanges(krs []*kr.KeyRange) error {
 				keyRange.UpperBound,
 			},
 		}); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -182,7 +194,7 @@ func (pi *PSQLInteractor) KeyRanges(krs []*kr.KeyRange) error {
 		&pgproto3.ReadyForQuery{},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -192,7 +204,7 @@ func (pi *PSQLInteractor) KeyRanges(krs []*kr.KeyRange) error {
 
 func (pi *PSQLInteractor) AddKeyRange(ctx context.Context, keyRange *kr.KeyRange) error {
 	if err := pi.WriteHeader("add key range"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -200,7 +212,7 @@ func (pi *PSQLInteractor) AddKeyRange(ctx context.Context, keyRange *kr.KeyRange
 		&pgproto3.DataRow{Values: [][]byte{[]byte(fmt.Sprintf("created key range from %s to %s", keyRange.LowerBound, keyRange.UpperBound))}},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -210,7 +222,7 @@ func (pi *PSQLInteractor) AddKeyRange(ctx context.Context, keyRange *kr.KeyRange
 
 func (pi *PSQLInteractor) SplitKeyRange(ctx context.Context, split *kr.SplitKeyRange) error {
 	if err := pi.WriteHeader("split key range"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -218,7 +230,7 @@ func (pi *PSQLInteractor) SplitKeyRange(ctx context.Context, split *kr.SplitKeyR
 		&pgproto3.DataRow{Values: [][]byte{[]byte(fmt.Sprintf("split key range %v by %s", split.SourceID, string(split.Bound)))}},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -228,7 +240,7 @@ func (pi *PSQLInteractor) SplitKeyRange(ctx context.Context, split *kr.SplitKeyR
 
 func (pi *PSQLInteractor) LockKeyRange(ctx context.Context, krid string) error {
 	if err := pi.WriteHeader("lock key range"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -238,7 +250,7 @@ func (pi *PSQLInteractor) LockKeyRange(ctx context.Context, krid string) error {
 		},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -248,7 +260,7 @@ func (pi *PSQLInteractor) LockKeyRange(ctx context.Context, krid string) error {
 
 func (pi *PSQLInteractor) UnlockKeyRange(ctx context.Context, krid string) error {
 	if err := pi.WriteHeader("unlock key range"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -260,7 +272,7 @@ func (pi *PSQLInteractor) UnlockKeyRange(ctx context.Context, krid string) error
 		},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -270,17 +282,17 @@ func (pi *PSQLInteractor) UnlockKeyRange(ctx context.Context, krid string) error
 
 func (pi *PSQLInteractor) Shards(ctx context.Context, shards []*datashards.DataShard) error {
 	if err := pi.WriteHeader("listing data shards"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
-	spqrlog.Logger.Printf(spqrlog.DEBUG1, "listing shards")
+	spqrlog.Zero.Debug().Msg("listing shards")
 
 	for _, shard := range shards {
 		if err := pi.cl.Send(&pgproto3.DataRow{
 			Values: [][]byte{[]byte(fmt.Sprintf("datashard with ID %s", shard.ID))},
 		}); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -290,7 +302,7 @@ func (pi *PSQLInteractor) Shards(ctx context.Context, shards []*datashards.DataS
 
 func (pi *PSQLInteractor) Clients(ctx context.Context, clients []client.Client) error {
 	if err := pi.WriteHeader("client id", "user", "dbname", "server_id"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -301,13 +313,13 @@ func (pi *PSQLInteractor) Clients(ctx context.Context, clients []client.Client) 
 					continue
 				}
 				if err := pi.WriteDataRow(cl.ID(), cl.Usr(), cl.DB(), sh.Instance().Hostname()); err != nil {
-					spqrlog.Logger.PrintError(err)
+					spqrlog.Zero.Error().Err(err).Msg("")
 					return err
 				}
 			}
 		} else {
 			if err := pi.WriteDataRow(cl.ID(), cl.Usr(), cl.DB(), "no backend connection"); err != nil {
-				spqrlog.Logger.PrintError(err)
+				spqrlog.Zero.Error().Err(err).Msg("")
 				return err
 			}
 		}
@@ -326,7 +338,7 @@ func (pi *PSQLInteractor) ShardingRules(ctx context.Context, rules []*shrule.Sha
 		}},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -356,7 +368,7 @@ func (pi *PSQLInteractor) ShardingRules(ctx context.Context, rules []*shrule.Sha
 				[]byte(hashFunctions.String()),
 			},
 		}); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -377,7 +389,7 @@ func (pi *PSQLInteractor) ReportError(err error) error {
 		},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -387,12 +399,12 @@ func (pi *PSQLInteractor) ReportError(err error) error {
 
 func (pi *PSQLInteractor) DropShardingRule(ctx context.Context, id string) error {
 	if err := pi.WriteHeader("drop sharding rule"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	if err := pi.WriteDataRow(fmt.Sprintf("dropped sharding rule %s", id)); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 	return pi.CompleteMsg(0)
@@ -400,12 +412,12 @@ func (pi *PSQLInteractor) DropShardingRule(ctx context.Context, id string) error
 
 func (pi *PSQLInteractor) AddShardingRule(ctx context.Context, rule *shrule.ShardingRule) error {
 	if err := pi.WriteHeader("add sharding rule"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	if err := pi.WriteDataRow(fmt.Sprintf("created %s", rule.String())); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 	return pi.CompleteMsg(0)
@@ -430,7 +442,7 @@ func (pi *PSQLInteractor) MergeKeyRanges(_ context.Context, unite *kr.UniteKeyRa
 		&pgproto3.ReadyForQuery{},
 	} {
 		if err := cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 		}
 	}
 
@@ -456,7 +468,7 @@ func (pi *PSQLInteractor) MoveKeyRange(_ context.Context, move *kr.MoveKeyRange)
 		&pgproto3.ReadyForQuery{},
 	} {
 		if err := pi.cl.Send(msg); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 		}
 	}
 
@@ -465,13 +477,13 @@ func (pi *PSQLInteractor) MoveKeyRange(_ context.Context, move *kr.MoveKeyRange)
 
 func (pi *PSQLInteractor) Routers(resp []*topology.Router) error {
 	if err := pi.WriteHeader("show routers"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	for _, msg := range resp {
 		if err := pi.WriteDataRow(fmt.Sprintf("router %s-%s", msg.ID, msg.Address)); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -481,12 +493,12 @@ func (pi *PSQLInteractor) Routers(resp []*topology.Router) error {
 
 func (pi *PSQLInteractor) UnregisterRouter(id string) error {
 	if err := pi.WriteHeader("unregister routers"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	if err := pi.WriteDataRow(fmt.Sprintf("router %s unregistered", id)); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -495,12 +507,12 @@ func (pi *PSQLInteractor) UnregisterRouter(id string) error {
 
 func (pi *PSQLInteractor) RegisterRouter(ctx context.Context, id string, addr string) error {
 	if err := pi.WriteHeader("register routers"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	if err := pi.WriteDataRow(fmt.Sprintf("router %s-%s registered", id, addr)); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
@@ -509,13 +521,13 @@ func (pi *PSQLInteractor) RegisterRouter(ctx context.Context, id string, addr st
 
 func (pi *PSQLInteractor) DropKeyRange(ctx context.Context, ids []string) error {
 	if err := pi.WriteHeader("drop key range"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	for _, id := range ids {
 		if err := pi.WriteDataRow(fmt.Sprintf("drop key range %s", id)); err != nil {
-			spqrlog.Logger.PrintError(err)
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 	}
@@ -525,12 +537,12 @@ func (pi *PSQLInteractor) DropKeyRange(ctx context.Context, ids []string) error 
 
 func (pi *PSQLInteractor) AddDataspace(ctx context.Context, ks *dataspaces.Dataspace) error {
 	if err := pi.WriteHeader("add dataspace"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	if err := pi.WriteDataRow(fmt.Sprintf("created dataspace with id %s", ks.ID())); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 	return pi.CompleteMsg(0)
@@ -538,27 +550,40 @@ func (pi *PSQLInteractor) AddDataspace(ctx context.Context, ks *dataspaces.Datas
 
 func (pi *PSQLInteractor) ReportStmtRoutedToAllShards(ctx context.Context) error {
 	if err := pi.WriteHeader("explain query"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	if err := pi.WriteDataRow("query routed to all shards (multishard)"); err != nil {
-		spqrlog.Logger.PrintError(err)
+		spqrlog.Zero.Error().Err(err).Msg("")
+		return err
+	}
+	return pi.CompleteMsg(0)
+}
+
+func (pi *PSQLInteractor) KillClient(clientID string) error {
+	if err := pi.WriteHeader("kill client"); err != nil {
+		spqrlog.Zero.Error().Err(err).Msg("")
+		return err
+	}
+
+	if err := pi.WriteDataRow(fmt.Sprintf("the client %s was killed", clientID)); err != nil {
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 	return pi.CompleteMsg(0)
 }
 
 func (pi *PSQLInteractor) BackendConnections(ctx context.Context, shs []shard.Shard) error {
-	if err := pi.WriteHeader("backend connection id", "shard name", "hostname", "user", "dbname"); err != nil {
-		spqrlog.Logger.PrintError(err)
+	if err := pi.WriteHeader("backend connection id", "shard name", "hostname", "user", "dbname", "sync", "tx_served", "tx status"); err != nil {
+		spqrlog.Zero.Error().Err(err).Msg("")
 		return err
 	}
 
 	for _, sh := range shs {
 
-		if err := pi.WriteDataRow(sh.ID(), sh.SHKey().Name, sh.Instance().Hostname(), sh.Usr(), sh.DB()); err != nil {
-			spqrlog.Logger.PrintError(err)
+		if err := pi.WriteDataRow(sh.ID(), sh.SHKey().Name, sh.Instance().Hostname(), sh.Usr(), sh.DB(), strconv.FormatInt(sh.Sync(), 10), strconv.FormatInt(sh.TxServed(), 10), sh.TxStatus().String()); err != nil {
+			spqrlog.Zero.Error().Err(err).Msg("")
 			return err
 		}
 

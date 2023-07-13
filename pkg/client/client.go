@@ -55,11 +55,14 @@ type Client interface {
 
 	Shutdown() error
 	Reset() error
+	Close() error
 
 	Shards() []shard.Shard
 	Cancel() error
 
 	Reply(msg string) error
+
+	SetAuthType(uint32) error
 }
 
 type InteractRunner interface {
